@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hire</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { display: flex; height: 100vh; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; }
+
+        #left-panel {
+            width: 340px;
+            min-width: 340px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 32px;
+            background: #16213e;
+            border-right: 1px solid #0f3460;
+        }
+
+        #btn-hire {
+            width: 220px;
+            height: 220px;
+            border: none;
+            border-radius: 50%;
+            background: linear-gradient(145deg, #2ecc71, #27ae60);
+            color: #fff;
+            font-size: 36px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 8px 30px rgba(46, 204, 113, 0.35);
+        }
+        #btn-hire:hover { transform: scale(1.06); box-shadow: 0 12px 40px rgba(46, 204, 113, 0.5); }
+        #btn-hire:active { transform: scale(0.97); }
+
+        #count {
+            font-size: 64px;
+            font-weight: 800;
+            color: #ecf0f1;
+        }
+        #count-label {
+            font-size: 14px;
+            color: #7f8c8d;
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            margin-top: -20px;
+        }
+
+        .toggle-row {
+            display: flex;
+            gap: 10px;
+        }
+        .toggle-btn {
+            padding: 8px 16px;
+            border: 1px solid #0f3460;
+            border-radius: 6px;
+            background: #1a1a2e;
+            color: #7f8c8d;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .toggle-btn:hover { border-color: #3498db; color: #ecf0f1; }
+        .toggle-btn.active { background: #0f3460; color: #3498db; border-color: #3498db; }
+
+        #right-panel {
+            flex: 1;
+            position: relative;
+        }
+        #right-panel canvas {
+            display: block;
+            width: 100% !important;
+            height: 100% !important;
+        }
+    </style>
+</head>
+<body>
+    <div id="left-panel">
+        <div id="count">0</div>
+        <div id="count-label">employees</div>
+        <button id="btn-hire">HIRE</button>
+        <div class="toggle-row">
+            <button id="btn-arc" class="toggle-btn">Arcs</button>
+            <button id="btn-timelapse" class="toggle-btn">Timelapse</button>
+            <button id="btn-perspective" class="toggle-btn">Perspective</button>
+        </div>
+    </div>
+    <div id="right-panel"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const container = document.getElementById('right-panel');
+const $ = id => document.getElementById(id);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#D3BCAE');
+
+const frustumSize = 15;
+let currentFrustum = frustumSize;
+let targetFrustum = frustumSize;
+const targetCenter = new THREE.Vector3();
+
+const cw = () => container.clientWidth;
+const ch = () => container.clientHeight;
+const aspect = () => cw() / ch();
+
+const orthoCamera = new THREE.OrthographicCamera(
+    -frustumSize * aspect(), frustumSize * aspect(),
+    frustumSize, -frustumSize, 0.1, 2000
+);
+orthoCamera.position.set(100, 100, 100);
+orthoCamera.lookAt(scene.position);
+
+const perspCamera = new THREE.PerspectiveCamera(45, aspect(), 0.1, 2000);
+perspCamera.position.set(30, 30, 30);
+perspCamera.lookAt(scene.position);
+
+let camera = orthoCamera;
+let isPerspective = false;
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(cw(), ch());
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+container.appendChild(renderer.domElement);
+
+const ambLight = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambLight);
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+dirLight.position.set(15, 25, 10);
+dirLight.castShadow = true;
+dirLight.shadow.camera.left = -20;
+dirLight.shadow.camera.right = 20;
+dirLight.shadow.camera.top = 20;
+dirLight.shadow.camera.bottom = -20;
+dirLight.shadow.mapSize.set(2048, 2048);
+scene.add(dirLight);
+scene.add(dirLight.target);
+
+const selectables = [];
+const allMeshes = [];
+const offices = [];
+let hoveredOfficeIdx = -1;
+let officeCount = 0;
+const ROOM_SPACING = 17;
+const HOVER_HEIGHT = 12;
+let timelapse = false;
+let sunAngle = 0;
+
+let orbit = new OrbitControls(camera, renderer.domElement);
+orbit.enableDamping = true;
+orbit.dampingFactor = 0.05;
+
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+
+function createBlock(w, h, d, x, y, z, color, parent) {
+    const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(w, h, d),
+        new THREE.MeshStandardMaterial({ color })
+    );
+    mesh.position.set(x, y, z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    (parent || scene).add(mesh);
+    selectables.push(mesh);
+    allMeshes.push(mesh);
+    return mesh;
+}
+
+function createGroupIn(x, y, z, parent) {
+    const group = new THREE.Group();
+    group.position.set(x, y, z);
+    (parent || scene).add(group);
+    selectables.push(group);
+    return group;
+}
+
+function addToGroup(group, w, h, d, x, y, z, color) {
+    const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(w, h, d),
+        new THREE.MeshStandardMaterial({ color })
+    );
+    mesh.position.set(x - group.position.x, y - group.position.y, z - group.position.z);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    allMeshes.push(mesh);
+    return mesh;
+}
+
+function generateChatBubbleTexture() {
+    const size = 96;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
+
+    const p = 3;
+    const bubble = [
+        '   XXXXXXXXXXXX   ',
+        '  X..............X ',
+        ' X................X',
+        ' X................X',
+        ' X................X',
+        ' X................X',
+        ' X................X',
+        '  X..............X ',
+        '   XXXXX.XXXXXXX  ',
+        '        X.X       ',
+        '         X        ',
+    ];
+
+    const phrases = ['Hello!', 'Hi :)', 'Busy!', 'Lunch?', 'TGIF', 'Zzz..', 'Sup?', 'BRB'];
+    const phrase = phrases[Math.floor(Math.random() * phrases.length)];
+
+    const bw = 19, bh = 11;
+    const ox = (size - bw * p) / 2, oy = (size - bh * p) / 2 - 4;
+
+    for (let row = 0; row < bh; row++) {
+        for (let col = 0; col < bubble[row].length; col++) {
+            const ch = bubble[row][col];
+            if (ch === 'X') {
+                ctx.fillStyle = '#222222';
+                ctx.fillRect(ox + col * p, oy + row * p, p, p);
+            } else if (ch === '.') {
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(ox + col * p, oy + row * p, p, p);
+            }
+        }
+    }
+
+    ctx.fillStyle = '#222222';
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(phrase, size / 2, oy + 5 * p);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    return tex;
+}
+
+function generateGlowTexture() {
+    const size = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    const gradient = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    gradient.addColorStop(0, 'rgba(255,255,255,1)');
+    gradient.addColorStop(0.2, 'rgba(255,255,255,0.6)');
+    gradient.addColorStop(0.5, 'rgba(255,255,255,0.15)');
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, size, size);
+    return new THREE.CanvasTexture(canvas);
+}
+
+function buildOffice(ox, oz) {
+    const wrapper = new THREE.Group();
+    wrapper.userData.isOfficeWrapper = true;
+    scene.add(wrapper);
+
+    const bl = (w, h, d, x, y, z, c) => createBlock(w, h, d, x + ox, y, z + oz, c, wrapper);
+    const gr = (x, y, z) => createGroupIn(x + ox, y, z + oz, wrapper);
+    const ag = (g, w, h, d, x, y, z, c) => addToGroup(g, w, h, d, x + ox, y, z + oz, c);
+
+    function chair(x, z, facingFront) {
+        const g = gr(x, 1.5, z);
+        ag(g, 1.5, 0.2, 1.5, x, 1.5, z, '#222222');
+        ag(g, 0.2, 1.5, 0.2, x - 0.65, 0.75, z - 0.65, '#222222');
+        ag(g, 0.2, 1.5, 0.2, x + 0.65, 0.75, z - 0.65, '#222222');
+        ag(g, 0.2, 1.5, 0.2, x - 0.65, 0.75, z + 0.65, '#222222');
+        ag(g, 0.2, 1.5, 0.2, x + 0.65, 0.75, z + 0.65, '#222222');
+        ag(g, 1.5, 1.5, 0.2, x, 2.3, facingFront ? z - 0.65 : z + 0.65, '#222222');
+        return g;
+    }
+
+    const wallPalette = ['#8B9EB5', '#8BA595', '#B5A08B', '#A58BA5', '#B58B8B', '#8BAAB5'];
+    const wallColor = wallPalette[Math.floor(Math.random() * wallPalette.length)];
+
+    bl(16, 0.5, 16, 0, -0.25, 0, '#666666');
+    bl(0.5, 12, 16, -8.25, 6, 0, wallColor);
+    bl(16, 12, 0.5, 0, 6, -8.25, wallColor);
+    for (let i = 1; i < 4; i++) {
+        bl(0.6, 12, 0.1, -7.8, 6, -8 + i * 4, '#222222');
+        bl(0.1, 12, 0.6, -8 + i * 4, 6, -7.8, '#222222');
+    }
+
+    const desk = gr(1.5, 2, 1.5);
+    ag(desk, 6, 0.4, 3, 1.5, 3.2, 1.5, '#A55D38');
+    ag(desk, 0.4, 3, 2.6, -1.3, 1.5, 1.5, '#A55D38');
+    ag(desk, 0.4, 3, 2.6, 4.3, 1.5, 1.5, '#A55D38');
+    ag(desk, 5.2, 2.5, 0.2, 1.5, 1.5, 0.3, '#A55D38');
+    ag(desk, 1.5, 1, 0.2, 1, 3.9, 1, '#444444');
+    ag(desk, 0.4, 0.5, 0.4, 1, 3.65, 0.9, '#222222');
+    ag(desk, 1.2, 0.1, 0.5, 1, 3.45, 2, '#222222');
+    ag(desk, 0.8, 0.3, 0.6, 3, 3.55, 1.5, '#222222');
+    ag(desk, 0.6, 0.5, 0.6, 2.3, 3.65, 1, '#FFFFFF');
+
+    const tallCab = gr(-4.5, 4, -4.5);
+    ag(tallCab, 3.5, 8, 3, -4.5, 4, -4.5, '#A55D38');
+    ag(tallCab, 1.7, 3.8, 0.1, -3.6, 6, -3, '#7E4225');
+    ag(tallCab, 1.7, 3.8, 0.1, -5.4, 6, -3, '#7E4225');
+    ag(tallCab, 3.4, 1.8, 0.1, -4.5, 3, -3, '#7E4225');
+    ag(tallCab, 3.4, 1.8, 0.1, -4.5, 1, -3, '#7E4225');
+
+    const lowCab = gr(4.5, 2, -4.5);
+    ag(lowCab, 3, 4, 4, 4.5, 2, -4.5, '#A55D38');
+    ag(lowCab, 0.3, 0.8, 0.8, 3.5, 4.4, -4.5, '#CC0000');
+    ag(lowCab, 0.3, 0.9, 0.8, 3.9, 4.45, -4.5, '#CCCC00');
+    ag(lowCab, 0.3, 0.8, 0.8, 4.3, 4.4, -4.5, '#0000CC');
+
+    bl(2.5, 3, 2, -6, 1.5, 4, '#A55D38');
+
+    const win = gr(-7.8, 5, 2);
+    ag(win, 0.2, 6, 5, -7.8, 6, 2, '#FFFFFF');
+    for (let i = 0; i < 15; i++) {
+        ag(win, 0.3, 0.1, 4.8, -7.75, 3.5 + i * 0.35, 2, '#E0E0E0');
+    }
+
+    const dc = gr(-1.5, 1.5, 2);
+    ag(dc, 1.5, 0.2, 1.5, -1.5, 1.5, 2, '#222222');
+    ag(dc, 0.2, 1.5, 0.2, -2.15, 0.75, 1.35, '#222222');
+    ag(dc, 0.2, 1.5, 0.2, -0.85, 0.75, 1.35, '#222222');
+    ag(dc, 0.2, 1.5, 0.2, -2.15, 0.75, 2.65, '#222222');
+    ag(dc, 0.2, 1.5, 0.2, -0.85, 0.75, 2.65, '#222222');
+    ag(dc, 1.5, 1.5, 0.2, -1.5, 2.3, 2.65, '#222222');
+    ag(dc, 1.5, 2, 0.2, -1.5, 3.5, 1.35, '#222222');
+
+    const a1 = gr(4, 7, -7.8);
+    ag(a1, 4, 2, 0.2, 4, 7, -7.8, '#A55D38');
+    ag(a1, 3.6, 1.6, 0.25, 4, 7, -7.7, '#296A82');
+
+    const a2 = gr(0, 8, -7.8);
+    ag(a2, 1, 1.5, 0.2, 0, 8, -7.8, '#A55D38');
+    ag(a2, 0.6, 1.1, 0.25, 0, 8, -7.7, '#222222');
+
+    const cert = gr(-7.8, 6.5, 6);
+    ag(cert, 0.2, 1.5, 2, -7.8, 6.5, 6, '#222222');
+    ag(cert, 0.25, 1.1, 1.6, -7.7, 6.5, 6, '#FFFFFF');
+
+    const lamp = gr(-1, 4, -6);
+    ag(lamp, 0.2, 8, 0.2, -1, 4, -6, '#222222');
+    ag(lamp, 1, 0.2, 1, -1, 0.1, -6, '#222222');
+    ag(lamp, 1.2, 1.5, 1.2, -1, 8, -6, '#222222');
+
+    const orbGeo = new THREE.SphereGeometry(1.2, 24, 24);
+    const orbColors = ['#ffcc66', '#66ccff', '#ff99cc', '#99ffaa', '#cc99ff', '#ffaa77'];
+    const orbColor = orbColors[Math.floor(Math.random() * orbColors.length)];
+    const orbModes = ['solid', 'dim', 'pulse'];
+    const orbMode = orbModes[Math.floor(Math.random() * orbModes.length)];
+    const baseEmissive = orbMode === 'dim' ? 2 : 5;
+    const baseLightIntensity = orbMode === 'dim' ? 0 : 6;
+    const orbMat = new THREE.MeshStandardMaterial({
+        color: orbColor, emissive: orbColor, emissiveIntensity: baseEmissive,
+        transparent: true, opacity: 0.95
+    });
+    const orb = new THREE.Mesh(orbGeo, orbMat);
+    orb.position.set(0 + ox, 10, 0 + oz);
+    wrapper.add(orb);
+    allMeshes.push(orb);
+    selectables.push(orb);
+
+    const orbLight = new THREE.PointLight(orbColor, baseLightIntensity, 25, 1);
+    orbLight.position.set(0 + ox, 10, 0 + oz);
+    wrapper.add(orbLight);
+
+    const glowSprite = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+            map: generateGlowTexture(),
+            color: orbColor,
+            transparent: true,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
+        })
+    );
+    glowSprite.scale.set(10, 10, 1);
+    glowSprite.position.set(0 + ox, 10, 0 + oz);
+    wrapper.add(glowSprite);
+
+    const chatSprite = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+            map: generateChatBubbleTexture(),
+            transparent: true,
+            depthTest: false,
+        })
+    );
+    chatSprite.scale.set(7, 7, 1);
+    chatSprite.position.set(0 + ox, 14, 0 + oz);
+    chatSprite.visible = false;
+    wrapper.add(chatSprite);
+
+    const idx = offices.length;
+    wrapper.traverse(c => { if (c.isMesh) c.userData.officeIndex = idx; });
+
+    offices.push({
+        wrapper, targetY: 0, chatBubble: chatSprite,
+        orbMode, orbMat, orbLight, glowSprite,
+        baseEmissive, baseLightIntensity,
+        pulseOffset: Math.random() * Math.PI * 2
+    });
+}
+
+// Hover detection
+renderer.domElement.addEventListener('pointermove', (e) => {
+    if (e.buttons !== 0) return;
+    const rect = container.getBoundingClientRect();
+    pointer.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+    pointer.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+    raycaster.setFromCamera(pointer, camera);
+    const hits = raycaster.intersectObjects(allMeshes);
+
+    let newIdx = -1;
+    if (hits.length) {
+        const oi = hits[0].object.userData.officeIndex;
+        if (oi !== undefined) newIdx = oi;
+    }
+
+    if (newIdx !== hoveredOfficeIdx) {
+        if (hoveredOfficeIdx >= 0 && offices[hoveredOfficeIdx]) {
+            offices[hoveredOfficeIdx].targetY = 0;
+            offices[hoveredOfficeIdx].chatBubble.visible = false;
+        }
+        hoveredOfficeIdx = newIdx;
+        if (hoveredOfficeIdx >= 0 && offices[hoveredOfficeIdx]) {
+            offices[hoveredOfficeIdx].targetY = HOVER_HEIGHT;
+            offices[hoveredOfficeIdx].chatBubble.visible = true;
+        }
+    }
+});
+
+renderer.domElement.addEventListener('pointerleave', () => {
+    if (hoveredOfficeIdx >= 0 && offices[hoveredOfficeIdx]) {
+        offices[hoveredOfficeIdx].targetY = 0;
+        offices[hoveredOfficeIdx].chatBubble.visible = false;
+    }
+    hoveredOfficeIdx = -1;
+});
+
+// Layout
+function getSquarePos(n) {
+    if (n === 0) return { x: 0, z: 0 };
+    const ring = Math.ceil(Math.sqrt(n + 1)) - 1;
+    const ringStart = ring * ring;
+    const idx = n - ringStart;
+    const side = ring + 1;
+    if (idx < side) return { x: ring * ROOM_SPACING, z: idx * ROOM_SPACING };
+    return { x: (idx - side) * ROOM_SPACING, z: ring * ROOM_SPACING };
+}
+
+function fitCamera() {
+    const box = new THREE.Box3();
+    selectables.forEach(s => box.expandByObject(s));
+    if (box.isEmpty()) return;
+
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.z);
+
+    targetFrustum = Math.max(frustumSize, maxDim * 0.6 + 4);
+    targetCenter.copy(center);
+
+    const shadowSize = maxDim * 0.7 + 10;
+    dirLight.target.position.copy(center);
+    dirLight.shadow.camera.left = -shadowSize;
+    dirLight.shadow.camera.right = shadowSize;
+    dirLight.shadow.camera.top = shadowSize;
+    dirLight.shadow.camera.bottom = -shadowSize;
+    dirLight.shadow.camera.updateProjectionMatrix();
+}
+
+function hire() {
+    const pos = getSquarePos(officeCount);
+    buildOffice(pos.x, pos.z);
+    officeCount++;
+    $('count').textContent = officeCount;
+    fitCamera();
+}
+
+// Arcs
+const arcs = [];
+
+function fireArc() {
+    if (offices.length < 2) return;
+
+    let a = Math.floor(Math.random() * offices.length);
+    let b;
+    do { b = Math.floor(Math.random() * offices.length); } while (b === a);
+
+    const boxA = new THREE.Box3().expandByObject(offices[a].wrapper);
+    const boxB = new THREE.Box3().expandByObject(offices[b].wrapper);
+    const start = boxA.getCenter(new THREE.Vector3());
+    const end = boxB.getCenter(new THREE.Vector3());
+    start.y = 13; end.y = 13;
+
+    const mid = start.clone().lerp(end, 0.5);
+    mid.y = 13 + start.distanceTo(end) * 0.35;
+
+    const curve = new THREE.QuadraticBezierCurve3(start, mid, end);
+    const totalPts = 80;
+    const pts = curve.getPoints(totalPts);
+
+    const shape = new THREE.CatmullRomCurve3(pts);
+    const radialSegs = 8;
+    const R = 0.25;
+    const capLen = 3;
+    const tubularSegs = totalPts;
+    const radiusFn = (t) => {
+        const edge = capLen / tubularSegs;
+        if (t < edge) return R * Math.sin((t / edge) * Math.PI * 0.5);
+        if (t > 1 - edge) return R * Math.sin(((1 - t) / edge) * Math.PI * 0.5);
+        return R;
+    };
+
+    const frames = shape.computeFrenetFrames(tubularSegs, false);
+    const tubeGeo = new THREE.TubeGeometry(shape, tubularSegs, radiusFn, radialSegs, false);
+
+    const pos2 = tubeGeo.attributes.position;
+    for (let ring = 0; ring <= tubularSegs; ring++) {
+        const t = ring / tubularSegs;
+        const rad = radiusFn(t);
+        const P = shape.getPointAt(t);
+        const N = frames.normals[ring];
+        const B = frames.binormals[ring];
+        for (let s = 0; s <= radialSegs; s++) {
+            const angle = (s / radialSegs) * Math.PI * 2;
+            const sin = Math.sin(angle), cos = Math.cos(angle);
+            const idx = ring * (radialSegs + 1) + s;
+            pos2.setXYZ(idx,
+                P.x + rad * (cos * N.x + sin * B.x),
+                P.y + rad * (cos * N.y + sin * B.y),
+                P.z + rad * (cos * N.z + sin * B.z)
+            );
+        }
+    }
+    pos2.needsUpdate = true;
+    tubeGeo.computeVertexNormals();
+
+    const tubeMat = new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, vertexColors: true
+    });
+
+    const posCount = tubeGeo.attributes.position.count;
+    const colors = new Float32Array(posCount * 4);
+    for (let j = 0; j < posCount; j++) {
+        colors[j * 4] = 1; colors[j * 4 + 1] = 0.7; colors[j * 4 + 2] = 0.15; colors[j * 4 + 3] = 0;
+    }
+    tubeGeo.setAttribute('color', new THREE.BufferAttribute(colors, 4));
+
+    const trail = new THREE.Mesh(tubeGeo, tubeMat);
+    trail.geometry.setDrawRange(0, 0);
+    scene.add(trail);
+
+    const totalTris = tubeGeo.index ? tubeGeo.index.count : posCount;
+    const ringSize = radialSegs + 1;
+    tubeGeo.computeBoundingSphere();
+    arcs.push({ trail, pts, totalPts, totalTris, ringSize, progress: 0, phase: 'fly', fadeOut: 1 });
+}
+
+function updateArcs() {
+    for (let i = arcs.length - 1; i >= 0; i--) {
+        const arc = arcs[i];
+        const frac = Math.min(arc.progress / arc.totalPts, 1);
+        const headRing = Math.floor(frac * arc.totalPts);
+        const tailLen = 50;
+        const colors = arc.trail.geometry.attributes.color;
+
+        if (arc.phase === 'fly') {
+            arc.progress += 1;
+            arc.trail.geometry.setDrawRange(0, Math.floor(frac * arc.totalTris));
+
+            for (let ring = 0; ring <= arc.totalPts; ring++) {
+                const dist = headRing - ring;
+                const a = (dist >= 0 && dist < tailLen) ? (1 - dist / tailLen) : 0;
+                for (let s = 0; s < arc.ringSize; s++) {
+                    colors.array[(ring * arc.ringSize + s) * 4 + 3] = a;
+                }
+            }
+            colors.needsUpdate = true;
+            if (frac >= 1) arc.phase = 'fade';
+        } else {
+            arc.fadeOut -= 0.03;
+            for (let ring = 0; ring <= arc.totalPts; ring++) {
+                for (let s = 0; s < arc.ringSize; s++) {
+                    const idx = (ring * arc.ringSize + s) * 4 + 3;
+                    colors.array[idx] = Math.max(0, colors.array[idx] - 0.03);
+                }
+            }
+            colors.needsUpdate = true;
+            if (arc.fadeOut <= 0) {
+                scene.remove(arc.trail);
+                arc.trail.geometry.dispose();
+                arc.trail.material.dispose();
+                arcs.splice(i, 1);
+            }
+        }
+    }
+}
+
+// Camera switch
+function switchCamera() {
+    const oldTarget = orbit.target.clone();
+    isPerspective = !isPerspective;
+    camera = isPerspective ? perspCamera : orthoCamera;
+
+    if (isPerspective) {
+        const dir = orthoCamera.position.clone().normalize();
+        perspCamera.position.copy(oldTarget).add(dir.multiplyScalar(currentFrustum * 2.5));
+    } else {
+        orthoCamera.position.copy(perspCamera.position.clone().normalize().multiplyScalar(100).add(oldTarget));
+    }
+    camera.lookAt(oldTarget);
+
+    orbit.dispose();
+    orbit = new OrbitControls(camera, renderer.domElement);
+    orbit.enableDamping = true;
+    orbit.dampingFactor = 0.05;
+    orbit.target.copy(oldTarget);
+
+    $('btn-perspective').classList.toggle('active', isPerspective);
+}
+
+// Button bindings
+$('btn-hire').addEventListener('click', hire);
+
+let arcInterval = null;
+$('btn-arc').addEventListener('click', () => {
+    if (arcInterval) {
+        clearInterval(arcInterval);
+        arcInterval = null;
+        $('btn-arc').classList.remove('active');
+    } else {
+        fireArc();
+        arcInterval = setInterval(fireArc, 800 + Math.random() * 700);
+        $('btn-arc').classList.add('active');
+    }
+});
+
+$('btn-timelapse').addEventListener('click', () => {
+    timelapse = !timelapse;
+    $('btn-timelapse').classList.toggle('active', timelapse);
+});
+
+$('btn-perspective').addEventListener('click', switchCamera);
+
+window.addEventListener('resize', () => {
+    renderer.setSize(cw(), ch());
+});
+
+// Init with one office
+hire();
+
+(function animate() {
+    requestAnimationFrame(animate);
+
+    const lerpSpeed = 0.06;
+    currentFrustum += (targetFrustum - currentFrustum) * lerpSpeed;
+    orbit.target.lerp(targetCenter, lerpSpeed);
+
+    if (!isPerspective) {
+        const camOffset = new THREE.Vector3(100, 100, 100);
+        const desiredCamPos = orbit.target.clone().add(camOffset);
+        camera.position.lerp(desiredCamPos, lerpSpeed);
+    } else {
+        const dir = new THREE.Vector3(1, 1, 1).normalize();
+        const dist = currentFrustum * 2.5;
+        const desiredCamPos = orbit.target.clone().add(dir.multiplyScalar(dist));
+        camera.position.lerp(desiredCamPos, lerpSpeed);
+    }
+
+    if (timelapse) sunAngle += 0.002;
+    const sunT = (Math.sin(sunAngle) + 1) / 2;
+    const sunRadius = 40;
+    const sunX = orbit.target.x + Math.cos(sunAngle) * sunRadius;
+    const sunY = Math.sin(sunAngle) * sunRadius;
+    const sunZ = orbit.target.z + Math.sin(sunAngle) * sunRadius * 0.3;
+
+    if (timelapse || sunAngle > 0) {
+        dirLight.position.set(sunX, Math.max(sunY, 2), sunZ);
+        const dayIntensity = Math.max(0, sunT);
+        dirLight.intensity = 0.5 + dayIntensity * 0.9;
+        ambLight.intensity = 0.35 + dayIntensity * 0.25;
+
+        const dawnDusk = Math.max(0, 1 - Math.abs(sunT - 0.3) * 4);
+        const nightness = Math.max(0, 1 - sunT * 2.5);
+
+        scene.background.setRGB(
+            Math.max(0.2, Math.min(1, 0.827 - nightness * 0.45 + dawnDusk * 0.1)),
+            Math.max(0.18, Math.min(1, 0.737 - nightness * 0.4 - dawnDusk * 0.05)),
+            Math.max(0.25, Math.min(1, 0.682 - nightness * 0.2 + dawnDusk * 0.05))
+        );
+        dirLight.color.setRGB(
+            Math.max(0.15, Math.min(1, 1 - nightness * 0.5 + dawnDusk * 0.15)),
+            Math.max(0.1, Math.min(1, 1 - nightness * 0.6 - dawnDusk * 0.2)),
+            Math.max(0.2, Math.min(1, 1 - nightness * 0.3 - dawnDusk * 0.4))
+        );
+    } else {
+        dirLight.position.set(orbit.target.x + 15, 25, orbit.target.z + 10);
+    }
+
+    const a = aspect();
+    if (!isPerspective) {
+        camera.left = -currentFrustum * a;
+        camera.right = currentFrustum * a;
+        camera.top = currentFrustum;
+        camera.bottom = -currentFrustum;
+        camera.updateProjectionMatrix();
+    } else {
+        camera.aspect = a;
+        camera.updateProjectionMatrix();
+    }
+
+    updateArcs();
+
+    const time = performance.now() * 0.001;
+    offices.forEach(office => {
+        const cur = office.wrapper.position.y;
+        const tgt = office.targetY;
+        if (Math.abs(cur - tgt) > 0.005) {
+            office.wrapper.position.y += (tgt - cur) * 0.12;
+        } else if (cur !== tgt) {
+            office.wrapper.position.y = tgt;
+        }
+
+        if (office.orbMode === 'pulse') {
+            const pulse = (Math.sin(time * 2.5 + office.pulseOffset) + 1) / 2;
+            office.orbMat.emissiveIntensity = 1.5 + pulse * 5;
+            office.orbLight.intensity = 1.5 + pulse * 6;
+            office.glowSprite.material.opacity = 0.3 + pulse * 0.7;
+        }
+    });
+
+    orbit.update();
+    renderer.render(scene, camera);
+})();
+    </script>
+</body>
+</html>

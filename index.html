@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voxel Office Editor</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="toolbar">
+        <div class="tool-group">
+            <button class="tool-btn active" data-mode="select" title="Select (1)">Select</button>
+            <button class="tool-btn" data-mode="move" title="Move (2)">Move</button>
+            <button class="tool-btn" data-mode="add" title="Add Block (3)">Add</button>
+            <button class="tool-btn" data-mode="delete" title="Delete (4)">Delete</button>
+        </div>
+        <div class="divider"></div>
+        <div class="tool-group">
+            <label class="color-wrap" title="New block color">
+                <input type="color" id="color-picker" value="#A55D38">
+            </label>
+        </div>
+        <div class="divider"></div>
+        <div class="tool-group hire-group">
+            <button id="btn-hire" class="hire-btn">Hire</button>
+            <span id="employee-count" class="counter">1</span>
+        </div>
+        <div class="divider"></div>
+        <div class="tool-group">
+            <button id="btn-arc" class="arc-btn">Arc</button>
+            <button id="btn-timelapse" class="tl-btn">Timelapse</button>
+            <button id="btn-perspective" class="tl-btn">Perspective</button>
+        </div>
+        <div class="divider"></div>
+        <div class="tool-group">
+            <button id="btn-save" class="action-btn" title="Save (Ctrl+S)">Save</button>
+            <button id="btn-load" class="action-btn" title="Load">Load</button>
+            <button id="btn-reset" class="action-btn" title="Reset to default">Reset</button>
+        </div>
+    </div>
+
+    <div id="properties" class="hidden">
+        <h3>Properties</h3>
+        <div class="prop-section">
+            <label>Position</label>
+            <div class="prop-row">
+                <div class="prop-field"><span>X</span><input type="number" id="pos-x" step="0.5"></div>
+                <div class="prop-field"><span>Y</span><input type="number" id="pos-y" step="0.5"></div>
+                <div class="prop-field"><span>Z</span><input type="number" id="pos-z" step="0.5"></div>
+            </div>
+        </div>
+        <div class="prop-section" id="size-section">
+            <label>Size</label>
+            <div class="prop-row">
+                <div class="prop-field"><span>W</span><input type="number" id="size-w" step="0.5" min="0.1"></div>
+                <div class="prop-field"><span>H</span><input type="number" id="size-h" step="0.5" min="0.1"></div>
+                <div class="prop-field"><span>D</span><input type="number" id="size-d" step="0.5" min="0.1"></div>
+            </div>
+        </div>
+        <div class="prop-section" id="color-section">
+            <label>Color</label>
+            <input type="color" id="obj-color" class="full-color-picker">
+        </div>
+        <div class="prop-section hidden" id="group-info">
+            <span class="group-label">Group &middot; <span id="group-count">0</span> blocks</span>
+        </div>
+        <div class="prop-actions">
+            <button id="btn-ungroup" class="prop-btn hidden">Ungroup</button>
+            <button id="btn-duplicate" class="prop-btn">Duplicate</button>
+            <button id="btn-delete-obj" class="prop-btn danger">Delete</button>
+        </div>
+    </div>
+
+    <div id="status-bar">
+        <span id="mode-hint">Click to select objects</span>
+        <span id="shortcut-hint">1-4: tools &middot; Del: delete &middot; D: duplicate &middot; Ctrl+S: save</span>
+    </div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>

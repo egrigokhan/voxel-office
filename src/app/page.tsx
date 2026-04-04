@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 import dynamic from 'next/dynamic';
 
 const VoxelScene = dynamic(() => import('@/components/VoxelScene'), { ssr: false });
@@ -9,16 +9,17 @@ export default function Home() {
   const [count, setCount] = useState(1);
   const [arcsOn, setArcsOn] = useState(false);
   const [timelapseOn, setTimelapseOn] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
 
   const handleHire = useCallback(() => {
     setCount(c => c + 1);
   }, []);
 
   return (
-    <div className="flex h-screen w-screen" style={{ background: '#D3BCAE' }}>
+    <div ref={wrapperRef} className="flex h-screen w-screen" style={{ background: '#D3BCAE' }}>
       <div
         className="flex flex-col items-center justify-center gap-8 shrink-0"
-        style={{ width: 340, background: '#D3BCAE' }}
+        style={{ width: 340 }}
       >
         <div className="text-7xl font-extrabold text-neutral-800">{count}</div>
         <div className="text-xs font-semibold uppercase tracking-[3px] text-neutral-600 -mt-4">
@@ -41,7 +42,7 @@ export default function Home() {
       </div>
 
       <div className="flex-1 relative">
-        <VoxelScene officeCount={count} arcsOn={arcsOn} timelapseOn={timelapseOn} />
+        <VoxelScene officeCount={count} arcsOn={arcsOn} timelapseOn={timelapseOn} bgSyncRef={wrapperRef} />
       </div>
     </div>
   );

@@ -8,12 +8,15 @@ interface VoxelSceneProps {
   officeCount: number;
   arcsOn?: boolean;
   timelapseOn?: boolean;
+  bgSyncRef?: React.RefObject<HTMLElement | null>;
 }
 
-export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = false }: VoxelSceneProps) {
+export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = false, bgSyncRef }: VoxelSceneProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<ReturnType<typeof initScene> | null>(null);
   const prevCountRef = useRef(0);
+  const bgSyncElRef = useRef(bgSyncRef);
+  bgSyncElRef.current = bgSyncRef;
 
   const initScene = useCallback((container: HTMLDivElement) => {
     const scene = new THREE.Scene();
@@ -75,6 +78,9 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
     let localOfficeCount = 0;
     const ROOM_SPACING = 17;
     const HOVER_HEIGHT = 12;
+    const MAX_FRUSTUM = 42;
+    let focusLockedAtMaxZoom = false;
+    const lockedFocusCenter = new THREE.Vector3();
     let timelapse = false;
     let sunAngle = 0;
 
@@ -355,21 +361,59 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
       const ringStart = ring * ring;
       const idx = n - ringStart;
       const side = ring + 1;
-      if (idx < side) return { x: ring * ROOM_SPACING, z: idx * ROOM_SPACING };
-      return { x: (idx - side) * ROOM_SPACING, z: ring * ROOM_SPACING };
+      if (idx < side) {
+        return { x: idx * ROOM_SPACING, z: -ring * ROOM_SPACING };
+      }
+      return { x: ring * ROOM_SPACING, z: (-ring + (idx - side + 1)) * ROOM_SPACING };
     }
 
     function fitCamera() {
       const box = new THREE.Box3();
       selectables.forEach(s => box.expandByObject(s));
       if (box.isEmpty()) return;
-      const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
-      const maxDim = Math.max(size.x, size.z);
-      targetFrustum = Math.max(frustumSize, maxDim * 0.6 + 4);
-      targetCenter.copy(center);
+      const anchorBox = new THREE.Box3().expandByObject(offices[0]?.wrapper || selectables[0]);
+      const anchorCenter = anchorBox.getCenter(new THREE.Vector3());
+      const anchorSize = anchorBox.getSize(new THREE.Vector3());
+      const sceneCenter = box.getCenter(new THREE.Vector3());
+      const extentX = Math.max(
+        Math.abs(box.min.x - anchorCenter.x),
+        Math.abs(box.max.x - anchorCenter.x)
+      );
+      const extentZ = Math.max(
+        Math.abs(box.min.z - anchorCenter.z),
+        Math.abs(box.max.z - anchorCenter.z)
+      );
+      const maxDim = Math.max(size.x, size.z, extentX * 2, extentZ * 2);
+      const desiredFrustum = Math.max(frustumSize, maxDim * 0.6 + 4);
+      targetFrustum = Math.min(desiredFrustum, MAX_FRUSTUM);
+
+      const nextCenter = sceneCenter.clone();
+      const halfVisibleX = targetFrustum * asp();
+      const halfVisibleZ = targetFrustum;
+      const padX = anchorSize.x * 0.5 + 2;
+      const padZ = anchorSize.z * 0.5 + 2;
+
+      // Stay centered until that would crop the original cubicle.
+      const maxCenterX = anchorCenter.x + halfVisibleX - padX;
+      const minCenterZ = anchorCenter.z - halfVisibleZ + padZ;
+
+      nextCenter.x = Math.min(nextCenter.x, maxCenterX);
+      nextCenter.z = Math.max(nextCenter.z, minCenterZ);
+
+      if (desiredFrustum >= MAX_FRUSTUM) {
+        if (!focusLockedAtMaxZoom) {
+          focusLockedAtMaxZoom = true;
+          lockedFocusCenter.copy(nextCenter);
+        }
+        targetCenter.copy(lockedFocusCenter);
+      } else {
+        focusLockedAtMaxZoom = false;
+        targetCenter.copy(nextCenter);
+      }
+
       const shadowSize = maxDim * 0.7 + 10;
-      dirLight.target.position.copy(center);
+      dirLight.target.position.copy(sceneCenter);
       dirLight.shadow.camera.left = -shadowSize;
       dirLight.shadow.camera.right = shadowSize;
       dirLight.shadow.camera.top = shadowSize;
@@ -560,11 +604,13 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
         ambLight.intensity = 0.35 + dayIntensity * 0.25;
         const dawnDusk = Math.max(0, 1 - Math.abs(sunT - 0.3) * 4);
         const nightness = Math.max(0, 1 - sunT * 2.5);
-        scene.background = new THREE.Color().setRGB(
-          Math.max(0.2, Math.min(1, 0.827 - nightness * 0.45 + dawnDusk * 0.1)),
-          Math.max(0.18, Math.min(1, 0.737 - nightness * 0.4 - dawnDusk * 0.05)),
-          Math.max(0.25, Math.min(1, 0.682 - nightness * 0.2 + dawnDusk * 0.05))
-        );
+        const bgR2 = Math.round(Math.max(0.2, Math.min(1, 0.827 - nightness * 0.45 + dawnDusk * 0.1)) * 255);
+        const bgG2 = Math.round(Math.max(0.18, Math.min(1, 0.737 - nightness * 0.4 - dawnDusk * 0.05)) * 255);
+        const bgB2 = Math.round(Math.max(0.25, Math.min(1, 0.682 - nightness * 0.2 + dawnDusk * 0.05)) * 255);
+        const bgCss = `rgb(${bgR2}, ${bgG2}, ${bgB2})`;
+        scene.background = new THREE.Color(bgCss);
+        const el = bgSyncElRef.current?.current;
+        if (el) el.style.background = bgCss;
         dirLight.color.setRGB(
           Math.max(0.15, Math.min(1, 1 - nightness * 0.5 + dawnDusk * 0.15)),
           Math.max(0.1, Math.min(1, 1 - nightness * 0.6 - dawnDusk * 0.2)),
@@ -572,6 +618,8 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
         );
       } else {
         dirLight.position.set(orbit.target.x + 15, 25, orbit.target.z + 10);
+        const el2 = bgSyncElRef.current?.current;
+        if (el2) el2.style.background = '#D3BCAE';
       }
 
       const a = asp();

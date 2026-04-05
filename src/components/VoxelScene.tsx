@@ -23,6 +23,17 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
     scene.background = new THREE.Color('#D3BCAE');
 
     const frustumSize = 15;
+    const cameraYaw = Math.PI / 3;
+    const orthoOffset = new THREE.Vector3(
+      Math.cos(cameraYaw) * 140,
+      100,
+      Math.sin(cameraYaw) * 140
+    );
+    const perspectiveDir = new THREE.Vector3(
+      Math.cos(cameraYaw),
+      1,
+      Math.sin(cameraYaw)
+    ).normalize();
     let currentFrustum = frustumSize;
     let targetFrustum = frustumSize;
     const targetCenter = new THREE.Vector3();
@@ -35,19 +46,22 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
       -frustumSize * asp(), frustumSize * asp(),
       frustumSize, -frustumSize, 0.1, 2000
     );
-    orthoCamera.position.set(100, 100, 100);
+    orthoCamera.position.copy(orthoOffset);
     orthoCamera.lookAt(scene.position);
 
     const perspCamera = new THREE.PerspectiveCamera(45, asp(), 0.1, 2000);
-    perspCamera.position.set(30, 30, 30);
+    perspCamera.position.copy(perspectiveDir.clone().multiplyScalar(52));
     perspCamera.lookAt(scene.position);
 
     let camera: THREE.Camera = orthoCamera;
     let isPerspective = false;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: 'high-performance',
+    });
     renderer.setSize(cw(), ch());
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     container.appendChild(renderer.domElement);
@@ -62,7 +76,7 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
     dirLight.shadow.camera.right = 20;
     dirLight.shadow.camera.top = 20;
     dirLight.shadow.camera.bottom = -20;
-    dirLight.shadow.mapSize.set(2048, 2048);
+    dirLight.shadow.mapSize.set(1024, 1024);
     scene.add(dirLight);
     scene.add(dirLight.target);
 
@@ -127,14 +141,14 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
     }
 
     function generateChatBubbleTexture() {
-      const size = 96;
+      const size = 192;
       const canvas = document.createElement('canvas');
       canvas.width = size;
       canvas.height = size;
       const ctx = canvas.getContext('2d')!;
       ctx.imageSmoothingEnabled = false;
 
-      const p = 3;
+      const p = 6;
       const bubble = [
         '   XXXXXXXXXXXX   ',
         '  X..............X ',
@@ -152,7 +166,8 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
       const phrases = ['Hello!', 'Hi :)', 'Busy!', 'Lunch?', 'TGIF', 'Zzz..', 'Sup?', 'BRB'];
       const phrase = phrases[Math.floor(Math.random() * phrases.length)];
       const bw = 19, bh = 11;
-      const ox = (size - bw * p) / 2, oy = (size - bh * p) / 2 - 4;
+      const ox = Math.round((size - bw * p) / 2);
+      const oy = Math.round((size - bh * p) / 2 - 8);
 
       for (let row = 0; row < bh; row++) {
         for (let col = 0; col < bubble[row].length; col++) {
@@ -163,14 +178,15 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
       }
 
       ctx.fillStyle = '#222222';
-      ctx.font = 'bold 12px monospace';
+      ctx.font = 'bold 26px monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(phrase, size / 2, oy + 5 * p);
+      ctx.fillText(phrase, size / 2, oy + 5.1 * p);
 
       const tex = new THREE.CanvasTexture(canvas);
-      tex.magFilter = THREE.NearestFilter;
-      tex.minFilter = THREE.NearestFilter;
+      tex.generateMipmaps = false;
+      tex.magFilter = THREE.LinearFilter;
+      tex.minFilter = THREE.LinearFilter;
       return tex;
     }
 
@@ -206,8 +222,8 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
       bl(0.5, 12, 16, -8.25, 6, 0, wallColor);
       bl(16, 12, 0.5, 0, 6, -8.25, wallColor);
       for (let i = 1; i < 4; i++) {
-        bl(0.6, 12, 0.1, -7.8, 6, -8 + i * 4, '#222222');
-        bl(0.1, 12, 0.6, -8 + i * 4, 6, -7.8, '#222222');
+        bl(0.6, 12, 0.1, -8.03, 6, -8 + i * 4, '#222222');
+        bl(0.1, 12, 0.6, -8 + i * 4, 6, -8.03, '#222222');
       }
 
       const desk = gr(1.5, 2, 1.5);
@@ -300,7 +316,13 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
       wrapper.add(glowSprite);
 
       const chatSprite = new THREE.Sprite(
-        new THREE.SpriteMaterial({ map: generateChatBubbleTexture(), transparent: true, depthTest: false })
+        new THREE.SpriteMaterial({
+          map: generateChatBubbleTexture(),
+          transparent: true,
+          depthTest: false,
+          depthWrite: false,
+          alphaTest: 0.08,
+        })
       );
       chatSprite.scale.set(7, 7, 1);
       chatSprite.position.set(0 + ox, 14, 0 + oz);
@@ -371,35 +393,51 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
       const box = new THREE.Box3();
       selectables.forEach(s => box.expandByObject(s));
       if (box.isEmpty()) return;
-      const size = box.getSize(new THREE.Vector3());
       const anchorBox = new THREE.Box3().expandByObject(offices[0]?.wrapper || selectables[0]);
       const anchorCenter = anchorBox.getCenter(new THREE.Vector3());
       const anchorSize = anchorBox.getSize(new THREE.Vector3());
       const sceneCenter = box.getCenter(new THREE.Vector3());
-      const extentX = Math.max(
-        Math.abs(box.min.x - anchorCenter.x),
-        Math.abs(box.max.x - anchorCenter.x)
-      );
-      const extentZ = Math.max(
-        Math.abs(box.min.z - anchorCenter.z),
-        Math.abs(box.max.z - anchorCenter.z)
-      );
-      const maxDim = Math.max(size.x, size.z, extentX * 2, extentZ * 2);
-      const desiredFrustum = Math.max(frustumSize, maxDim * 0.6 + 4);
-      targetFrustum = Math.min(desiredFrustum, MAX_FRUSTUM);
-
       const nextCenter = sceneCenter.clone();
-      const halfVisibleX = targetFrustum * asp();
-      const halfVisibleZ = targetFrustum;
+      const aspect = asp();
       const padX = anchorSize.x * 0.5 + 2;
       const padZ = anchorSize.z * 0.5 + 2;
 
-      // Stay centered until that would crop the original cubicle.
-      const maxCenterX = anchorCenter.x + halfVisibleX - padX;
-      const minCenterZ = anchorCenter.z - halfVisibleZ + padZ;
+      const centeredHalfX =
+        Math.max(Math.abs(box.min.x - nextCenter.x), Math.abs(box.max.x - nextCenter.x)) + 2;
+      const centeredHalfZ =
+        Math.max(Math.abs(box.min.z - nextCenter.z), Math.abs(box.max.z - nextCenter.z)) + 2;
+      const preliminaryFrustum = Math.min(
+        Math.max(frustumSize, centeredHalfZ, centeredHalfX / Math.max(aspect, 0.01)),
+        MAX_FRUSTUM
+      );
 
-      nextCenter.x = Math.min(nextCenter.x, maxCenterX);
-      nextCenter.z = Math.max(nextCenter.z, minCenterZ);
+      const halfVisibleX = preliminaryFrustum * aspect;
+      const halfVisibleZ = preliminaryFrustum;
+
+      // Stay centered until that would crop the original cubicle.
+      const preliminaryMaxCenterX = anchorCenter.x + halfVisibleX - padX;
+      const preliminaryMinCenterZ = anchorCenter.z - halfVisibleZ + padZ;
+
+      nextCenter.x = Math.min(nextCenter.x, preliminaryMaxCenterX);
+      nextCenter.z = Math.max(nextCenter.z, preliminaryMinCenterZ);
+
+      const neededHalfX =
+        Math.max(Math.abs(box.min.x - nextCenter.x), Math.abs(box.max.x - nextCenter.x)) + 2;
+      const neededHalfZ =
+        Math.max(Math.abs(box.min.z - nextCenter.z), Math.abs(box.max.z - nextCenter.z)) + 2;
+      const desiredFrustum = Math.max(
+        frustumSize,
+        neededHalfZ,
+        neededHalfX / Math.max(aspect, 0.01)
+      );
+      targetFrustum = Math.min(desiredFrustum, MAX_FRUSTUM);
+
+      const finalHalfVisibleX = targetFrustum * aspect;
+      const finalHalfVisibleZ = targetFrustum;
+      const minCenterX = anchorCenter.x - finalHalfVisibleX + padX;
+      const maxCenterX = anchorCenter.x + finalHalfVisibleX - padX;
+      const minCenterZ = anchorCenter.z - finalHalfVisibleZ + padZ;
+      const maxCenterZ = anchorCenter.z + finalHalfVisibleZ - padZ;
 
       if (desiredFrustum >= MAX_FRUSTUM) {
         if (!focusLockedAtMaxZoom) {
@@ -412,7 +450,15 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
         targetCenter.copy(nextCenter);
       }
 
-      const shadowSize = maxDim * 0.7 + 10;
+      // Never allow the original office to leave the frame.
+      targetCenter.x = Math.max(minCenterX, Math.min(maxCenterX, targetCenter.x));
+      targetCenter.z = Math.max(minCenterZ, Math.min(maxCenterZ, targetCenter.z));
+
+      if (focusLockedAtMaxZoom) {
+        lockedFocusCenter.copy(targetCenter);
+      }
+
+      const shadowSize = Math.max(neededHalfX, neededHalfZ) * 1.4 + 10;
       dirLight.target.position.copy(sceneCenter);
       dirLight.shadow.camera.left = -shadowSize;
       dirLight.shadow.camera.right = shadowSize;
@@ -553,7 +599,7 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
         const dir = orthoCamera.position.clone().normalize();
         perspCamera.position.copy(oldTarget).add(dir.multiplyScalar(currentFrustum * 2.5));
       } else {
-        orthoCamera.position.copy(perspCamera.position.clone().normalize().multiplyScalar(100).add(oldTarget));
+        orthoCamera.position.copy(oldTarget).add(orthoOffset);
       }
       camera.lookAt(oldTarget);
       orbit.dispose();
@@ -564,7 +610,11 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
     }
 
     // Resize
-    const onResize = () => renderer.setSize(cw(), ch());
+    const onResize = () => {
+      renderer.setSize(cw(), ch());
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.25));
+      fitCamera();
+    };
     window.addEventListener('resize', onResize);
 
     // Arc interval
@@ -580,17 +630,15 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
       orbit.target.lerp(targetCenter, lerpSpeed);
 
       if (!isPerspective) {
-        const camOffset = new THREE.Vector3(100, 100, 100);
-        const desiredCamPos = orbit.target.clone().add(camOffset);
+        const desiredCamPos = orbit.target.clone().add(orthoOffset);
         camera.position.lerp(desiredCamPos, lerpSpeed);
       } else {
-        const dir = new THREE.Vector3(1, 1, 1).normalize();
         const dist = currentFrustum * 2.5;
-        const desiredCamPos = orbit.target.clone().add(dir.multiplyScalar(dist));
+        const desiredCamPos = orbit.target.clone().add(perspectiveDir.clone().multiplyScalar(dist));
         camera.position.lerp(desiredCamPos, lerpSpeed);
       }
 
-      if (timelapse) sunAngle += 0.002;
+      if (timelapse) sunAngle += 0.004;
       const sunT = (Math.sin(sunAngle) + 1) / 2;
       const sunRadius = 40;
       const sunX2 = orbit.target.x + Math.cos(sunAngle) * sunRadius;
@@ -600,21 +648,21 @@ export default function VoxelScene({ officeCount, arcsOn = false, timelapseOn = 
       if (timelapse || sunAngle > 0) {
         dirLight.position.set(sunX2, Math.max(sunY2, 2), sunZ2);
         const dayIntensity = Math.max(0, sunT);
-        dirLight.intensity = 0.5 + dayIntensity * 0.9;
-        ambLight.intensity = 0.35 + dayIntensity * 0.25;
+        dirLight.intensity = 0.68 + dayIntensity * 0.72;
+        ambLight.intensity = 0.48 + dayIntensity * 0.16;
         const dawnDusk = Math.max(0, 1 - Math.abs(sunT - 0.3) * 4);
         const nightness = Math.max(0, 1 - sunT * 2.5);
-        const bgR2 = Math.round(Math.max(0.2, Math.min(1, 0.827 - nightness * 0.45 + dawnDusk * 0.1)) * 255);
-        const bgG2 = Math.round(Math.max(0.18, Math.min(1, 0.737 - nightness * 0.4 - dawnDusk * 0.05)) * 255);
-        const bgB2 = Math.round(Math.max(0.25, Math.min(1, 0.682 - nightness * 0.2 + dawnDusk * 0.05)) * 255);
+        const bgR2 = Math.round(Math.max(0.24, Math.min(1, 0.827 - nightness * 0.48 + dawnDusk * 0.02)) * 255);
+        const bgG2 = Math.round(Math.max(0.24, Math.min(1, 0.737 - nightness * 0.4 + dawnDusk * 0.01)) * 255);
+        const bgB2 = Math.round(Math.max(0.26, Math.min(1, 0.682 - nightness * 0.34 + dawnDusk * 0.01)) * 255);
         const bgCss = `rgb(${bgR2}, ${bgG2}, ${bgB2})`;
         scene.background = new THREE.Color(bgCss);
         const el = bgSyncElRef.current?.current;
         if (el) el.style.background = bgCss;
         dirLight.color.setRGB(
-          Math.max(0.15, Math.min(1, 1 - nightness * 0.5 + dawnDusk * 0.15)),
-          Math.max(0.1, Math.min(1, 1 - nightness * 0.6 - dawnDusk * 0.2)),
-          Math.max(0.2, Math.min(1, 1 - nightness * 0.3 - dawnDusk * 0.4))
+          Math.max(0.45, Math.min(1, 1 - nightness * 0.5 + dawnDusk * 0.03)),
+          Math.max(0.45, Math.min(1, 1 - nightness * 0.5 + dawnDusk * 0.02)),
+          Math.max(0.47, Math.min(1, 1 - nightness * 0.45 + dawnDusk * 0.01))
         );
       } else {
         dirLight.position.set(orbit.target.x + 15, 25, orbit.target.z + 10);
